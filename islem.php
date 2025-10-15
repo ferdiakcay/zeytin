@@ -124,6 +124,73 @@ if(isset($_POST['zeytinTipiEkle'])) {
 } */
 
 
+
+// Hızlı Müşteri Ekleme (AJAX için)
+if(isset($_POST['action']) && $_POST['action'] == 'hizliMusteriEkle') {
+    header('Content-Type: application/json; charset=utf-8');
+    
+    try {
+        $adSoyad = trim($_POST['adSoyad'] ?? '');
+        $phone = trim($_POST['phone'] ?? '');
+        $email = trim($_POST['email'] ?? '');
+        $adres = trim($_POST['adres'] ?? '');
+        
+        // Validasyon
+        if(empty($adSoyad) || empty($phone)) {
+            throw new Exception("Ad soyad ve telefon alanları zorunludur!");
+        }
+        
+        // Telefon numarasını temizle
+        $cleanPhone = preg_replace('/[^0-9]/', '', $phone);
+        if(strlen($cleanPhone) != 10) {
+            throw new Exception("Geçerli bir telefon numarası giriniz (10 haneli)!");
+        }
+        
+        // E-posta validasyonu
+        if(!empty($email) && !filter_var($email, FILTER_VALIDATE_EMAIL)) {
+            throw new Exception("Geçersiz e-posta adresi!");
+        }
+        
+        // Müşteri ekleme sorgusu
+        $sorgu = $db->prepare("INSERT INTO tbl_musteri SET 
+            adSoyad = ?,
+            phone = ?,
+            email = ?,
+            adres = ?,
+            musteriTipi = 'bireysel',
+            durum = 1,
+            kayitTarihi = NOW()");
+        
+        $ekle = $sorgu->execute([$adSoyad, $cleanPhone, $email, $adres]);
+        
+        if($ekle) {
+            $musteriId = $db->lastInsertId();
+            
+            echo json_encode([
+                'success' => true,
+                'message' => 'Müşteri başarıyla eklendi!',
+                'musteriId' => $musteriId,
+                'musteriAdi' => $adSoyad,
+                'phone' => $cleanPhone
+            ]);
+        } else {
+            throw new Exception("Müşteri eklenirken veritabanı hatası oluştu!");
+        }
+        
+    } catch (Exception $e) {
+        echo json_encode([
+            'success' => false,
+            'message' => $e->getMessage()
+        ]);
+    }
+    exit;
+}
+
+
+
+
+
+
 // Çoklu zeytin alım ekleme işlemi
 if(isset($_POST['zeytinAlimEkle'])) {
     $musteriId = intval($_POST['musteriId']);
@@ -134,6 +201,17 @@ if(isset($_POST['zeytinAlimEkle'])) {
     
     try {
         $db->beginTransaction();
+        
+        // Alış No oluştur (AL202412150001 formatında)
+        $alisNo = 'AL' . date('Ymd') . sprintf('%04d', rand(1000, 9999));
+        
+        // Alış No'nun benzersiz olduğundan emin ol
+        $checkSorgu = $db->prepare("SELECT COUNT(*) FROM tbl_zeytin_alis WHERE alisNo = ?");
+        $checkSorgu->execute([$alisNo]);
+        while($checkSorgu->fetchColumn() > 0) {
+            $alisNo = 'AL' . date('Ymd') . sprintf('%04d', rand(1000, 9999));
+            $checkSorgu->execute([$alisNo]);
+        }
         
         $alisId = null;
         
@@ -154,8 +232,9 @@ if(isset($_POST['zeytinAlimEkle'])) {
             $birimFiyat = floatval($tip['birimFiyat']);
             $toplamTutar = $miktar * $birimFiyat;
             
-            // Alımı veritabanına kaydet
+            // Alımı veritabanına kaydet (alisNo ile birlikte)
             $sorgu = $db->prepare("INSERT INTO tbl_zeytin_alis SET 
+                                alisNo = ?,
                                 musteriId = ?,
                                 tipId = ?,
                                 miktar = ?,
@@ -164,12 +243,13 @@ if(isset($_POST['zeytinAlimEkle'])) {
                                 alisTarihi = ?,
                                 odemeDurumu = ?,
                                 aciklama = ?,
+                                urunAciklama = ?,
                                 durum = 1,
                                 kayitTarihi = NOW()");
             
             $ekle = $sorgu->execute([
-                $musteriId, $tipId, $miktar, $birimFiyat, $toplamTutar, 
-                $alisTarihi, $odemeDurumu, $urunAciklama
+                $alisNo, $musteriId, $tipId, $miktar, $birimFiyat, $toplamTutar, 
+                $alisTarihi, $odemeDurumu, $aciklama, $urunAciklama
             ]);
             
             if(!$ekle) {
@@ -181,27 +261,54 @@ if(isset($_POST['zeytinAlimEkle'])) {
                 $alisId = $db->lastInsertId();
             }
             
-            // Stok güncelle
-            $stokSorgu = $db->prepare("UPDATE tbl_zeytin_stok SET miktar = miktar + ? WHERE tipId = ?");
-            $stokSorgu->execute([$miktar, $tipId]);
+            // STOK GÜNCELLEME - BASİT VE ETKİLİ VERSİYON
+            // Önce bu tipId için stok kaydı var mı kontrol et
+            $stokKontrol = $db->prepare("SELECT stokId, miktar FROM tbl_zeytin_stok WHERE tipId = ?");
+            $stokKontrol->execute([$tipId]);
+            $mevcutStok = $stokKontrol->fetch(PDO::FETCH_ASSOC);
+            
+            if($mevcutStok) {
+                // Stok kaydı varsa GÜNCELLE
+                $yeniMiktar = floatval($mevcutStok['miktar']) + $miktar;
+                $stokGuncelle = $db->prepare("UPDATE tbl_zeytin_stok SET miktar = ?, sonGuncelleme = NOW() WHERE tipId = ?");
+                $stokGuncelleSonuc = $stokGuncelle->execute([$yeniMiktar, $tipId]);
+                
+                if(!$stokGuncelleSonuc) {
+                    throw new Exception("Stok güncellenirken hata oluştu! TipID: " . $tipId);
+                }
+                
+                error_log("Stok güncellendi - TipID: $tipId, Eski: " . $mevcutStok['miktar'] . ", Eklenen: $miktar, Yeni: $yeniMiktar");
+            } else {
+                // Stok kaydı yoksa YENİ EKLE
+                $stokEkle = $db->prepare("INSERT INTO tbl_zeytin_stok (tipId, miktar, sonGuncelleme) VALUES (?, ?, NOW())");
+                $stokEkleSonuc = $stokEkle->execute([$tipId, $miktar]);
+                
+                if(!$stokEkleSonuc) {
+                    throw new Exception("Stok kaydı oluşturulurken hata oluştu! TipID: " . $tipId);
+                }
+                
+                error_log("Yeni stok kaydı oluşturuldu - TipID: $tipId, Miktar: $miktar");
+            }
         }
         
         $db->commit();
         
-        // Fiş yazdırma sayfasına yönlendir
-        header("Location: fis-yazdir.php?alisId=" . $alisId . "&coklu=1");
+        // Başarı mesajı ve yönlendirme
+        header("Location: fis-yazdir.php?alisNo=" . $alisNo . "&durum=success");
         exit;
         
     } catch(PDOException $e) {
         $db->rollBack();
+        error_log("Stok Hatası (PDO): " . $e->getMessage());
         header("Location: zeytin-alim.php?durum=hata&mesaj=Veritabanı hatası: " . $e->getMessage());
+        exit;
     } catch(Exception $e) {
         $db->rollBack();
+        error_log("Stok Hatası (Genel): " . $e->getMessage());
         header("Location: zeytin-alim.php?durum=hata&mesaj=" . $e->getMessage());
+        exit;
     }
-    exit;
 }
-
 
 // Silme işlemleri
 if(isset($_GET['zeytinTuruSil'])) {
@@ -374,7 +481,23 @@ if(isset($_GET['musteriSil'])) {
 }
 
 
-
+// Stok güncelleme işlemi
+if(isset($_GET['islem']) && $_GET['islem'] == 'stokGuncelle') {
+    include 'config.php';
+    
+    $stokId = intval($_GET['stokId']);
+    $miktar = floatval($_GET['miktar']);
+    
+    try {
+        $sorgu = $db->prepare("UPDATE tbl_zeytin_stok SET miktar = ?, sonGuncelleme = NOW() WHERE stokId = ?");
+        $sorgu->execute([$miktar, $stokId]);
+        
+        echo json_encode(['success' => true, 'message' => 'Stok güncellendi']);
+    } catch(Exception $e) {
+        echo json_encode(['success' => false, 'message' => $e->getMessage()]);
+    }
+    exit;
+}
 ?>
 
 

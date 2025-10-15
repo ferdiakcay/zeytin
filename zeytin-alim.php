@@ -347,20 +347,25 @@ function formatPhone($phone) {
                 <div class="modal-body">
                     <div class="mb-3">
                         <label class="form-label">Ad Soyad <span class="text-danger">*</span></label>
-                        <input type="text" class="form-control" name="adSoyad" id="hizliAdSoyad" required placeholder="Müşteri adı ve soyadı">
+                        <input type="text" class="form-control" name="adSoyad" id="hizliAdSoyad" required 
+                               placeholder="Müşteri adı ve soyadı" maxlength="100">
                     </div>
                     <div class="mb-3">
                         <label class="form-label">Telefon <span class="text-danger">*</span></label>
-                        <input type="tel" class="form-control phone-input" name="phone" id="hizliPhone" placeholder="5xx xxx xx xx" required>
-                        <div class="form-text">10 haneli telefon numarası giriniz (5xxxxxxxxx)</div>
+                        <input type="tel" class="form-control phone-input" name="phone" id="hizliPhone" 
+                               placeholder="5xx xxx xx xx" required maxlength="14"
+                               pattern="[0-9\s]{10,14}" title="10 haneli telefon numarası">
+                        <div class="form-text">10 haneli telefon numarası giriniz (5xx xxx xx xx)</div>
                     </div>
                     <div class="mb-3">
                         <label class="form-label">E-posta</label>
-                        <input type="email" class="form-control" name="email" id="hizliEmail" placeholder="musteri@ornek.com">
+                        <input type="email" class="form-control" name="email" id="hizliEmail" 
+                               placeholder="musteri@ornek.com" maxlength="100">
                     </div>
                     <div class="mb-3">
                         <label class="form-label">Adres</label>
-                        <textarea class="form-control" name="adres" id="hizliAdres" rows="2" placeholder="Müşteri adresi"></textarea>
+                        <textarea class="form-control" name="adres" id="hizliAdres" rows="2" 
+                                  placeholder="Müşteri adresi" maxlength="255"></textarea>
                     </div>
                 </div>
                 <div class="modal-footer">
@@ -730,63 +735,123 @@ function resetForm() {
     }
 }
 
-// Hızlı müşteri ekleme
+// Hızlı müşteri ekleme - DÜZELTİLMİŞ VERSİYON
 function addQuickCustomer() {
     const formData = {
-        adSoyad: $('#hizliAdSoyad').val(),
+        action: 'hizliMusteriEkle', // Bu satır eklendi
+        adSoyad: $('#hizliAdSoyad').val().trim(),
         phone: $('#hizliPhone').val().replace(/\s/g, ''),
-        email: $('#hizliEmail').val(),
-        adres: $('#hizliAdres').val()
+        email: $('#hizliEmail').val().trim(),
+        adres: $('#hizliAdres').val().trim()
     };
     
-    if (!formData.adSoyad || !formData.phone) {
-        showAlert('Ad soyad ve telefon alanları zorunludur!', 'warning');
+    // Validasyon
+    if (!formData.adSoyad) {
+        showAlert('Ad soyad alanı zorunludur!', 'warning');
+        $('#hizliAdSoyad').focus();
         return;
     }
     
-    if (formData.phone.replace(/\D/g, '').length !== 10) {
-        showAlert('Geçerli bir telefon numarası giriniz!', 'warning');
+    if (!formData.phone) {
+        showAlert('Telefon alanı zorunludur!', 'warning');
+        $('#hizliPhone').focus();
         return;
     }
+    
+    const cleanPhone = formData.phone.replace(/\D/g, '');
+    if (cleanPhone.length !== 10) {
+        showAlert('Geçerli bir telefon numarası giriniz (10 haneli)!', 'warning');
+        $('#hizliPhone').focus();
+        return;
+    }
+    
+    // Loading state
+    const submitBtn = $('#hizliMusteriForm').find('button[type="submit"]');
+    const originalText = submitBtn.html();
+    submitBtn.prop('disabled', true).html('<i class="bx bx-loader bx-spin me-1"></i> Ekleniyor...');
     
     // AJAX ile müşteri ekleme
     $.ajax({
         url: 'islem.php',
         type: 'POST',
-        data: {
-            action: 'hizliMusteriEkle',
-            ...formData
-        },
+        data: formData,
+        dataType: 'json',
         success: function(response) {
-            try {
-                const result = JSON.parse(response);
-                if (result.success) {
-                    $('#hizliMusteriEkleModal').modal('hide');
-                    $('#hizliMusteriForm')[0].reset();
-                    
-                    // Yeni müşteriyi select'e ekle
-                    const newOption = new Option(
-                        formData.adSoyad + ' - ' + formatPhoneDisplay(formData.phone),
-                        result.musteriId,
-                        false,
-                        true
-                    );
-                    $('#musteriSelect').append(newOption).trigger('change');
-                    
-                    showAlert('Müşteri başarıyla eklendi!', 'success');
-                } else {
-                    showAlert(result.message || 'Müşteri eklenirken hata oluştu!', 'danger');
-                }
-            } catch (e) {
-                showAlert('Sunucu yanıtı işlenirken hata oluştu!', 'danger');
+            if (response.success) {
+                // Modal'ı kapat ve formu temizle
+                $('#hizliMusteriEkleModal').modal('hide');
+                $('#hizliMusteriForm')[0].reset();
+                
+                // Yeni müşteriyi select'e ekle
+                const displayText = response.musteriAdi + ' - ' + formatPhoneDisplay(response.phone);
+                const newOption = new Option(displayText, response.musteriId, true, true);
+                
+                $('#musteriSelect').append(newOption).trigger('change');
+                
+                // Select2'yi güncelle
+                $('#musteriSelect').trigger('change.select2');
+                
+                showAlert(response.message, 'success');
+                
+            } else {
+                showAlert(response.message || 'Müşteri eklenirken hata oluştu!', 'danger');
             }
         },
-        error: function() {
-            showAlert('Sunucu ile bağlantı kurulamadı!', 'danger');
+        error: function(xhr, status, error) {
+            console.error('AJAX Hatası:', error);
+            showAlert('Sunucu ile bağlantı kurulamadı! Lütfen tekrar deneyin.', 'danger');
+        },
+        complete: function() {
+            // Butonu eski haline getir
+            submitBtn.prop('disabled', false).html(originalText);
         }
     });
 }
 
+// Telefon formatlama fonksiyonunu güncelle
+function formatPhoneInput(e) {
+    let input = e.target;
+    let value = input.value.replace(/\D/g, '');
+    
+    if (value.length > 10) {
+        value = value.substring(0, 10);
+    }
+    
+    // Format: 5xx xxx xx xx
+    if (value.length > 0) {
+        let formatted = '';
+        if (value.length >= 1) formatted = value.substring(0, 3);
+        if (value.length >= 4) formatted += ' ' + value.substring(3, 6);
+        if (value.length >= 7) formatted += ' ' + value.substring(6, 8);
+        if (value.length >= 9) formatted += ' ' + value.substring(8, 10);
+        
+        input.value = formatted;
+    } else {
+        input.value = value;
+    }
+}
+
+// Sayfa yüklendiğinde event listener'ları başlat
+$(document).ready(function() {
+    // ... diğer kodlar ...
+    
+    // Hızlı müşteri ekleme modal event'leri
+    $('#hizliMusteriEkleModal').on('shown.bs.modal', function () {
+        $('#hizliAdSoyad').focus();
+    });
+    
+    $('#hizliMusteriEkleModal').on('hidden.bs.modal', function () {
+        $('#hizliMusteriForm')[0].reset();
+    });
+    
+    // Enter tuşu ile submit
+    $('#hizliMusteriForm').on('keypress', function(e) {
+        if (e.which === 13) {
+            e.preventDefault();
+            addQuickCustomer();
+        }
+    });
+});
 // Yardımcı fonksiyonlar
 function formatPhoneDisplay(phone) {
     if (!phone) return '-';

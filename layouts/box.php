@@ -355,33 +355,37 @@ $bugunTarih = date('d.m.Y');
                         <thead class="table-light">
                             <tr>
                                 <th>#</th>
+                                <th>Alış No</th>
                                 <th>Müşteri</th>
-                                <th>Zeytin Türü/Tipi</th>
-                                <th>Miktar</th>
-                                <th>Birim Fiyat</th>
+                                <th>Ürünler</th>
+                                <th>Toplam Miktar</th>
                                 <th>Toplam Tutar</th>
                                 <th>Ödeme Durumu</th>
                                 <th>Zaman</th>
+                                <th width="80">İşlem</th>
                             </tr>
                         </thead>
                         <tbody>
                             <?php
+                            // Bugünkü alımları alışNo'ya göre grupla
                             $sorgu = $db->prepare("
                                 SELECT 
-                                    z.alisId,
-                                    z.miktar,
-                                    z.birimFiyat,
-                                    z.toplamTutar,
-                                    z.odemeDurumu,
+                                    z.alisNo,
+                                    z.alisTarihi,
                                     z.kayitTarihi,
+                                    z.odemeDurumu,
                                     m.adSoyad,
-                                    zt.turAdi,
-                                    ztp.tipAdi
+                                    m.phone,
+                                    COUNT(z.alisId) as urun_sayisi,
+                                    SUM(z.miktar) as toplam_miktar,
+                                    SUM(z.toplamTutar) as toplam_tutar,
+                                    GROUP_CONCAT(CONCAT(zt.turAdi, ' - ', ztp.tipAdi) SEPARATOR ' | ') as urunler
                                 FROM tbl_zeytin_alis z
                                 LEFT JOIN tbl_musteri m ON z.musteriId = m.musteriId
                                 LEFT JOIN tbl_zeytin_tipleri ztp ON z.tipId = ztp.tipId
                                 LEFT JOIN tbl_zeytin_turleri zt ON ztp.turId = zt.turId
                                 WHERE z.durum = 1 AND z.alisTarihi = CURDATE()
+                                GROUP BY z.alisNo
                                 ORDER BY z.kayitTarihi DESC
                             ");
                             $sorgu->execute();
@@ -389,11 +393,13 @@ $bugunTarih = date('d.m.Y');
                             $say = 1;
                             $toplamBugunMiktar = 0;
                             $toplamBugunTutar = 0;
+                            $toplamBugunAlis = 0;
                             
                             if($sorgu->rowCount() > 0) {
                                 while($alim = $sorgu->fetch(PDO::FETCH_ASSOC)) {
-                                    $toplamBugunMiktar += $alim['miktar'];
-                                    $toplamBugunTutar += $alim['toplamTutar'];
+                                    $toplamBugunMiktar += $alim['toplam_miktar'];
+                                    $toplamBugunTutar += $alim['toplam_tutar'];
+                                    $toplamBugunAlis++;
                                     
                                     $odemeDurumuClass = [
                                         'odenmedi' => 'danger',
@@ -406,20 +412,33 @@ $bugunTarih = date('d.m.Y');
                                         'kismi_odendi' => 'Kısmen Ödendi',
                                         'odenmis' => 'Ödendi'
                                     ][$alim['odemeDurumu']] ?? $alim['odemeDurumu'];
+                                    
+                                    // Ürün listesini kısalt
+                                    $urunler = $alim['urunler'];
+                                    if (strlen($urunler) > 40) {
+                                        $urunler = substr($urunler, 0, 40) . '...';
+                                    }
                             ?>
-                            <tr>
+                            <tr class="alis-row" onclick="showAlimDetail('<?php echo $alim['alisNo']; ?>')" style="cursor: pointer;">
                                 <td><?php echo $say++; ?></td>
                                 <td>
+                                    <strong class="text-primary"><?php echo $alim['alisNo']; ?></strong>
+                                    <br>
+                                    <small class="text-muted"><?php echo $alim['urun_sayisi']; ?> ürün</small>
+                                </td>
+                                <td>
                                     <strong><?php echo htmlspecialchars($alim['adSoyad']); ?></strong>
+                                    <br>
+                                    <small class="text-muted"><?php echo htmlspecialchars($alim['phone']); ?></small>
                                 </td>
                                 <td>
-                                    <small class="text-muted"><?php echo htmlspecialchars($alim['turAdi'] ?? '-'); ?></small>
-                                    <div><?php echo htmlspecialchars($alim['tipAdi'] ?? '-'); ?></div>
+                                    <small><?php echo htmlspecialchars($urunler); ?></small>
                                 </td>
-                                <td><?php echo number_format($alim['miktar'], 2); ?> kg</td>
-                                <td><?php echo number_format($alim['birimFiyat'], 2); ?> TL</td>
                                 <td>
-                                    <strong><?php echo number_format($alim['toplamTutar'], 2); ?> TL</strong>
+                                    <strong><?php echo number_format($alim['toplam_miktar'], 2); ?> kg</strong>
+                                </td>
+                                <td>
+                                    <strong class="text-success"><?php echo number_format($alim['toplam_tutar'], 2); ?> TL</strong>
                                 </td>
                                 <td>
                                     <span class="badge bg-<?php echo $odemeDurumuClass; ?>">
@@ -431,13 +450,20 @@ $bugunTarih = date('d.m.Y');
                                         <?php echo date('H:i', strtotime($alim['kayitTarihi'])); ?>
                                     </small>
                                 </td>
+                                <td class="text-center" onclick="event.stopPropagation();">
+                                    <button type="button" class="btn btn-sm btn-outline-primary" 
+                                            onclick="showAlimDetail('<?php echo $alim['alisNo']; ?>')"
+                                            data-bs-toggle="tooltip" title="Detay Göster">
+                                        <i class="bx bx-show"></i>
+                                    </button>
+                                </td>
                             </tr>
                             <?php 
                                 }
                             } else { 
                             ?>
                             <tr>
-                                <td colspan="8" class="text-center text-muted py-4">
+                                <td colspan="9" class="text-center text-muted py-4">
                                     <i class="bx bx-package display-4 d-block mb-2"></i>
                                     Bugün henüz zeytin alımı yapılmamıştır.
                                 </td>
@@ -447,10 +473,10 @@ $bugunTarih = date('d.m.Y');
                         <?php if($sorgu->rowCount() > 0): ?>
                         <tfoot class="table-light">
                             <tr>
-                                <th colspan="3" class="text-end">Bugün Toplam:</th>
+                                <th colspan="4" class="text-end">Bugün Toplam:</th>
                                 <th><?php echo number_format($toplamBugunMiktar, 2); ?> kg</th>
-                                <th>-</th>
                                 <th><?php echo number_format($toplamBugunTutar, 2); ?> TL</th>
+                                <th><?php echo $toplamBugunAlis; ?> alış</th>
                                 <th colspan="2"></th>
                             </tr>
                         </tfoot>
@@ -461,7 +487,6 @@ $bugunTarih = date('d.m.Y');
         </div>
     </div>
 </div>
-
 <!-- Son 7 Gün Özeti -->
 <div class="row mt-4">
     <div class="col-lg-12">
@@ -582,6 +607,126 @@ document.addEventListener('DOMContentLoaded', function() {
                 });
             }
         }, duration / steps);
+    });
+});
+</script>
+
+<!-- Alım Detay Modal -->
+<div class="modal fade" id="alimDetailModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-xl">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Alış Detayları - <span id="modalAlisNo"></span></h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body" id="alimDetailContent">
+                <div class="text-center py-4">
+                    <div class="spinner-border text-primary" role="status">
+                        <span class="visually-hidden">Yükleniyor...</span>
+                    </div>
+                    <p class="mt-2">Alış detayları yükleniyor...</p>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Kapat</button>
+                <button type="button" class="btn btn-primary" id="printDetailBtn">
+                    <i class="bx bx-printer me-1"></i> Fiş Yazdır
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+
+    // Alım detayını göster
+function showAlimDetail(alisNo) {
+    currentAlisNo = alisNo;
+    document.getElementById('modalAlisNo').textContent = alisNo;
+    
+    // Modal'ı aç
+    const modal = new bootstrap.Modal(document.getElementById('alimDetailModal'));
+    modal.show();
+    
+    // Detayları yükle
+    loadAlimDetail(alisNo);
+}
+
+// Alım detaylarını yükle
+function loadAlimDetail(alisNo) {
+    // Loading state göster
+    document.getElementById('alimDetailContent').innerHTML = `
+        <div class="text-center py-4">
+            <div class="spinner-border text-primary" role="status">
+                <span class="visually-hidden">Yükleniyor...</span>
+            </div>
+            <p class="mt-2">Alış detayları yükleniyor...</p>
+        </div>
+    `;
+
+    // Basit AJAX isteği
+    fetch(`ajax-simple.php?islem=alimDetay&alisNo=${alisNo}`)
+        .then(response => {
+            if (!response.ok) {
+                throw new Error('Network response was not ok: ' + response.status);
+            }
+            return response.text();
+        })
+        .then(html => {
+            document.getElementById('alimDetailContent').innerHTML = html;
+            
+            // Yazdır butonunu etkinleştir
+            document.getElementById('printDetailBtn').onclick = function() {
+                printFis(alisNo);
+            };
+        })
+        .catch(error => {
+            console.error('Hata:', error);
+            document.getElementById('alimDetailContent').innerHTML = `
+                <div class="alert alert-danger">
+                    <h5>Hata!</h5>
+                    <p>Alış detayları yüklenirken bir hata oluştu.</p>
+                    <p class="mb-0"><strong>Hata:</strong> ${error.message}</p>
+                    <p class="mb-0"><strong>Alış No:</strong> ${alisNo}</p>
+                    <button class="btn btn-sm btn-warning mt-2" onclick="loadAlimDetail('${alisNo}')">
+                        Tekrar Dene
+                    </button>
+                </div>
+            `;
+        });
+}
+
+// Fiş yazdırma
+function printFis(alisNo) {
+    // Yeni pencerede fiş sayfasını aç
+    const printWindow = window.open(`fis-yazdir.php?alisNo=${alisNo}`, '_blank');
+    
+    // Yazdırma butonuna tıklanmasını bekle
+    setTimeout(() => {
+        if (printWindow) {
+            printWindow.focus();
+        }
+    }, 1000);
+}
+
+// Modal kapandığında
+document.getElementById('alimDetailModal').addEventListener('hidden.bs.modal', function () {
+    currentAlisNo = '';
+    document.getElementById('alimDetailContent').innerHTML = `
+        <div class="text-center py-4">
+            <div class="spinner-border text-primary" role="status">
+                <span class="visually-hidden">Yükleniyor...</span>
+            </div>
+            <p class="mt-2">Yükleniyor...</p>
+        </div>
+    `;
+});
+
+// Tooltip'leri başlat
+document.addEventListener('DOMContentLoaded', function() {
+    var tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'));
+    var tooltipList = tooltipTriggerList.map(function (tooltipTriggerEl) {
+        return new bootstrap.Tooltip(tooltipTriggerEl);
     });
 });
 </script>

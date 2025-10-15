@@ -32,6 +32,33 @@
             font-size: 11px;
             color: #666;
         }
+        .coklu-badge {
+            background: #dc3545;
+            color: white;
+            padding: 1px 6px;
+            border-radius: 10px;
+            font-size: 10px;
+            margin-left: 5px;
+        }
+        .alis-row {
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }
+        .alis-row:hover {
+            background-color: #f8f9fa !important;
+        }
+        .urun-count {
+            background: #007bff;
+            color: white;
+            border-radius: 50%;
+            width: 20px;
+            height: 20px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 10px;
+            margin-left: 5px;
+        }
     </style>
 </head>
 
@@ -59,7 +86,7 @@
                                 <h5 class="card-title mb-0">Zeytin Alım Kayıtları</h5>
                                 <div class="d-flex gap-2">
                                     <div class="search-box">
-                                        <input type="text" class="form-control" id="searchInput" placeholder="Müşteri ara...">
+                                        <input type="text" class="form-control" id="searchInput" placeholder="Müşteri veya alış no ara...">
                                     </div>
                                     <a href="zeytin-alim.php" class="btn btn-light">
                                         <i class="bx bx-plus me-1"></i> Yeni Alım
@@ -106,11 +133,10 @@
                                         <thead class="table-light">
                                             <tr>
                                                 <th width="50">#</th>
-                                                <th>Tarih/Saat</th>
+                                                <th>Alış No / Tarih</th>
                                                 <th>Müşteri</th>
-                                                <th>Zeytin Bilgisi</th>
-                                                <th>Miktar</th>
-                                                <th>Birim Fiyat</th>
+                                                <th>Ürünler</th>
+                                                <th>Toplam Miktar</th>
                                                 <th>Toplam Tutar</th>
                                                 <th>Ödeme Durumu</th>
                                                 <th width="140">İşlemler</th>
@@ -120,28 +146,27 @@
                                             <?php
                                             include 'config.php';
                                             
-                                            // Alım listesini çek
+                                            // Alış numaralarına göre gruplanmış alım listesini çek
                                             $sorgu = $db->prepare("
                                                 SELECT 
-                                                    z.alisId,
+                                                    z.alisNo,
                                                     z.alisTarihi,
                                                     z.kayitTarihi,
-                                                    z.miktar,
-                                                    z.birimFiyat,
-                                                    z.toplamTutar,
                                                     z.odemeDurumu,
                                                     z.aciklama,
                                                     m.adSoyad,
                                                     m.phone,
-                                                    zt.turAdi,
-                                                    ztp.tipAdi,
-                                                    ztp.birim
+                                                    COUNT(z.alisId) as urun_sayisi,
+                                                    SUM(z.miktar) as toplam_miktar,
+                                                    SUM(z.toplamTutar) as toplam_tutar,
+                                                    GROUP_CONCAT(CONCAT(zt.turAdi, ' - ', ztp.tipAdi) SEPARATOR ' | ') as urunler
                                                 FROM tbl_zeytin_alis z
                                                 LEFT JOIN tbl_musteri m ON z.musteriId = m.musteriId
                                                 LEFT JOIN tbl_zeytin_tipleri ztp ON z.tipId = ztp.tipId
                                                 LEFT JOIN tbl_zeytin_turleri zt ON ztp.turId = zt.turId
                                                 WHERE z.durum = 1
-                                                ORDER BY z.alisId DESC
+                                                GROUP BY z.alisNo
+                                                ORDER BY z.kayitTarihi DESC
                                             ");
                                             $sorgu->execute();
                                             $say = 1;
@@ -172,59 +197,74 @@
                                                     'kismi_odendi' => 'Kısmen Ödendi',
                                                     'odenmis' => 'Ödendi'
                                                 ][$alis['odemeDurumu']] ?? $alis['odemeDurumu'];
+                                                
+                                                // Ürün listesini kısalt
+                                                $urunler = $alis['urunler'];
+                                                if (strlen($urunler) > 50) {
+                                                    $urunler = substr($urunler, 0, 50) . '...';
+                                                }
                                             ?>
-                                            <tr class="status-<?= $alis['odemeDurumu'] ?>" 
+                                            <tr class="status-<?= $alis['odemeDurumu'] ?> alis-row" 
                                                 data-status="<?= $alis['odemeDurumu'] ?>" 
                                                 data-name="<?= htmlspecialchars($alis['adSoyad']) ?>"
+                                                data-alisno="<?= $alis['alisNo'] ?>"
                                                 data-date="<?= strtotime($alis['kayitTarihi']) ?>"
-                                                data-tutar="<?= $alis['toplamTutar'] ?>">
+                                                data-tutar="<?= $alis['toplam_tutar'] ?>"
+                                                onclick="showAlimDetail('<?= $alis['alisNo'] ?>')">
                                                 <td><?= $say++ ?></td>
                                                 <td>
-                                                    <div class="fw-bold"><?= date('d.m.Y', strtotime($alis['alisTarihi'])) ?></div>
-                                                    <div class="fis-small"><?= date('H:i', strtotime($alis['kayitTarihi'])) ?></div>
-                                                    <div class="fis-small text-muted">Fiş: <?= str_pad($alis['alisId'], 6, '0', STR_PAD_LEFT) ?></div>
+                                                    <div class="fw-bold text-primary"><?= $alis['alisNo'] ?></div>
+                                                    <div class="fis-small"><?= date('d.m.Y', strtotime($alis['alisTarihi'])) ?></div>
+                                                    <div class="fis-small text-muted"><?= date('H:i', strtotime($alis['kayitTarihi'])) ?></div>
                                                 </td>
                                                 <td>
                                                     <div class="fw-bold"><?= htmlspecialchars($alis['adSoyad']) ?></div>
                                                     <div class="fis-small text-muted"><?= htmlspecialchars($alis['phone']) ?></div>
                                                 </td>
                                                 <td>
-                                                    <div class="fw-bold"><?= htmlspecialchars($alis['turAdi'] ?? '-') ?></div>
-                                                    <div class="fis-small"><?= htmlspecialchars($alis['tipAdi'] ?? '-') ?></div>
+                                                    <div class="fw-bold">
+                                                        <?= $alis['urun_sayisi'] ?> Ürün
+                                                        <span class="urun-count"><?= $alis['urun_sayisi'] ?></span>
+                                                    </div>
+                                                    <div class="fis-small"><?= htmlspecialchars($urunler) ?></div>
                                                     <?php if(!empty($alis['aciklama'])): ?>
                                                     <div class="fis-small text-muted"><?= htmlspecialchars($alis['aciklama']) ?></div>
                                                     <?php endif; ?>
                                                 </td>
-                                                <td><?= number_format($alis['miktar'], 2) ?> <?= $alis['birim'] ?></td>
-                                                <td><?= number_format($alis['birimFiyat'], 2) ?> TL</td>
                                                 <td>
-                                                    <div class="fw-bold text-primary"><?= number_format($alis['toplamTutar'], 2) ?> TL</div>
+                                                    <div class="fw-bold"><?= number_format($alis['toplam_miktar'], 2) ?> kg</div>
+                                                </td>
+                                                <td>
+                                                    <div class="fw-bold text-primary"><?= number_format($alis['toplam_tutar'], 2) ?> TL</div>
                                                 </td>
                                                 <td>
                                                     <span class="badge bg-<?= $odemeDurumuClass ?>"><?= $odemeDurumuText ?></span>
+                                                </div>
                                                 </td>
-                                                <td class="table-actions">
+                                                <td class="table-actions" onclick="event.stopPropagation();">
                                                     <div class="btn-group btn-group-sm" role="group">
                                                         <button type="button" class="btn btn-outline-primary print-btn" 
-                                                                onclick="printFis(<?= $alis['alisId'] ?>)"
+                                                                onclick="printFis('<?= $alis['alisNo'] ?>')"
                                                                 data-bs-toggle="tooltip" title="Fiş Yazdır">
                                                             <i class="bx bx-printer"></i>
                                                         </button>
-                                                       <!--  <button type="button" class="btn btn-outline-info" 
-                                                                onclick="viewAlim(<?= $alis['alisId'] ?>)"
-                                                                data-bs-toggle="tooltip" title="Detay">
+                                                        <button type="button" class="btn btn-outline-info" 
+                                                                onclick="showAlimDetail('<?= $alis['alisNo'] ?>')"
+                                                                data-bs-toggle="tooltip" title="Detay Göster">
                                                             <i class="bx bx-show"></i>
                                                         </button>
+                                                        <!--
                                                         <button type="button" class="btn btn-outline-warning" 
-                                                                onclick="editAlim(<?= $alis['alisId'] ?>)"
+                                                                onclick="editAlim('<?= $alis['alisNo'] ?>')"
                                                                 data-bs-toggle="tooltip" title="Düzenle">
                                                             <i class="bx bx-edit"></i>
                                                         </button>
                                                         <button type="button" class="btn btn-outline-danger" 
-                                                                onclick="deleteAlim(<?= $alis['alisId'] ?>, '<?= htmlspecialchars($alis['adSoyad']) ?>')"
+                                                                onclick="deleteAlim('<?= $alis['alisNo'] ?>', '<?= htmlspecialchars($alis['adSoyad']) ?>')"
                                                                 data-bs-toggle="tooltip" title="Sil">
                                                             <i class="bx bx-trash"></i>
-                                                        </button> -->
+                                                        </button>
+                                                        -->
                                                     </div>
                                                 </td>
                                             </tr>
@@ -232,7 +272,7 @@
                                             
                                             <?php if($toplamAlim == 0): ?>
                                             <tr>
-                                                <td colspan="9" class="text-center text-muted py-4">
+                                                <td colspan="8" class="text-center text-muted py-4">
                                                     <i class="bx bx-package display-4 d-block mb-2"></i>
                                                     Henüz alım kaydı bulunmamaktadır.
                                                 </td>
@@ -246,7 +286,7 @@
                                 <div class="row mt-3">
                                     <div class="col-sm-12 col-md-6">
                                         <div class="dataTables_info">
-                                            Toplam <strong><?= $toplamAlim ?></strong> alım kaydı | 
+                                            Toplam <strong><?= $toplamAlim ?></strong> alış kaydı | 
                                             <span class="text-success"><?= $odenmisAlim ?> ödenmiş</span> | 
                                             <span class="text-warning"><?= $kismiAlim ?> kısmen</span> | 
                                             <span class="text-danger"><?= $odenmediAlim ?> ödenmemiş</span>
@@ -267,14 +307,25 @@
 
 <!-- Alım Detay Modal -->
 <div class="modal fade" id="alimDetailModal" tabindex="-1" aria-hidden="true">
-    <div class="modal-dialog modal-lg">
+    <div class="modal-dialog modal-xl">
         <div class="modal-content">
             <div class="modal-header">
-                <h5 class="modal-title">Alım Detayları</h5>
+                <h5 class="modal-title">Alış Detayları - <span id="modalAlisNo"></span></h5>
                 <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
             </div>
             <div class="modal-body" id="alimDetailContent">
-                <!-- Detaylar buraya yüklenecek -->
+                <div class="text-center">
+                    <div class="spinner-border text-primary" role="status">
+                        <span class="visually-hidden">Yükleniyor...</span>
+                    </div>
+                    <p class="mt-2">Yükleniyor...</p>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Kapat</button>
+                <button type="button" class="btn btn-primary" id="printDetailBtn">
+                    <i class="bx bx-printer me-1"></i> Fiş Yazdır
+                </button>
             </div>
         </div>
     </div>
@@ -283,6 +334,9 @@
 <?php include 'layouts/vendor-scripts.php'; ?>
 
 <script>
+// Global değişkenler
+let currentAlisNo = '';
+
 // Sayfa yüklendiğinde
 document.addEventListener('DOMContentLoaded', function() {
     // Sayıları güncelle
@@ -328,7 +382,8 @@ document.getElementById('searchInput').addEventListener('keyup', function() {
     
     rows.forEach(row => {
         const customerName = row.getAttribute('data-name').toLowerCase();
-        if (customerName.includes(searchTerm)) {
+        const alisNo = row.getAttribute('data-alisno').toLowerCase();
+        if (customerName.includes(searchTerm) || alisNo.includes(searchTerm)) {
             row.style.display = '';
         } else {
             row.style.display = 'none';
@@ -379,10 +434,52 @@ function sortTable(sortType) {
     rows.forEach(row => tbody.appendChild(row));
 }
 
+// Alım detayını göster
+function showAlimDetail(alisNo) {
+    currentAlisNo = alisNo;
+    document.getElementById('modalAlisNo').textContent = alisNo;
+    
+    // Modal'ı aç
+    const modal = new bootstrap.Modal(document.getElementById('alimDetailModal'));
+    modal.show();
+    
+    // Detayları yükle
+    loadAlimDetail(alisNo);
+}
+
+// Alım detaylarını yükle
+function loadAlimDetail(alisNo) {
+    fetch(`ajax.php?islem=alimDetay&alisNo=${alisNo}`)
+        .then(response => {
+            if (!response.ok) {
+                throw new Error('Network response was not ok');
+            }
+            return response.text();
+        })
+        .then(data => {
+            document.getElementById('alimDetailContent').innerHTML = data;
+            
+            // Yazdır butonunu etkinleştir
+            document.getElementById('printDetailBtn').onclick = function() {
+                printFis(alisNo);
+            };
+        })
+        .catch(error => {
+            console.error('Hata:', error);
+            document.getElementById('alimDetailContent').innerHTML = `
+                <div class="alert alert-danger">
+                    <h5>Hata!</h5>
+                    <p>Alım detayları yüklenirken bir hata oluştu.</p>
+                    <p class="mb-0">${error.message}</p>
+                </div>
+            `;
+        });
+}
+
 // Fiş yazdırma
-function printFis(alisId) {
+function printFis(alisNo) {
     // Yeni pencerede fiş sayfasını aç
-    const printWindow = window.open(`fis-yazdir.php?alisId=${alisId}`, '_blank');
+    const printWindow = window.open(`fis-yazdir.php?alisNo=${alisNo}`, '_blank');
     
     // Yazdırma butonuna tıklanmasını bekle
     setTimeout(() => {
@@ -392,46 +489,30 @@ function printFis(alisId) {
     }, 500);
 }
 
-// Alım detayını görüntüle
-function viewAlim(alisId) {
-    fetch(`ajax.php?islem=alimDetay&alisId=${alisId}`)
-        .then(response => response.text())
-        .then(data => {
-            document.getElementById('alimDetailContent').innerHTML = data;
-            var modal = new bootstrap.Modal(document.getElementById('alimDetailModal'));
-            modal.show();
-        })
-        .catch(error => {
-            console.error('Hata:', error);
-            alert('Alım detayları yüklenirken bir hata oluştu.');
-        });
-}
-
 // Alım düzenle
-function editAlim(alisId) {
-    window.location.href = `alim-duzenle.php?id=${alisId}`;
+function editAlim(alisNo) {
+    window.location.href = `alim-duzenle.php?alisNo=${alisNo}`;
 }
 
 // Alım sil
-function deleteAlim(alisId, musteriAdi) {
-    if(confirm(`"${musteriAdi}" adlı müşteriye ait bu alımı silmek istediğinizden emin misiniz?\n\nBu işlem geri alınamaz!`)) {
-        window.location.href = `islem.php?alimSil=${alisId}`;
+function deleteAlim(alisNo, musteriAdi) {
+    if(confirm(`"${musteriAdi}" adlı müşteriye ait "${alisNo}" numaralı alışı silmek istediğinizden emin misiniz?\n\nBu işlem geri alınamaz ve tüm ürün kayıtları silinecektir!`)) {
+        window.location.href = `islem.php?alimSil=${alisNo}`;
     }
 }
 
-// Toplu yazdırma (isteğe bağlı)
-function batchPrint() {
-    const selectedRows = document.querySelectorAll('#alisTable tbody tr[data-selected="true"]');
-    if (selectedRows.length === 0) {
-        alert('Lütfen yazdırmak istediğiniz fişleri seçin!');
-        return;
-    }
-    
-    selectedRows.forEach(row => {
-        const alisId = row.querySelector('td:first-child').textContent.trim();
-        printFis(alisId);
-    });
-}
+// Modal kapandığında
+document.getElementById('alimDetailModal').addEventListener('hidden.bs.modal', function () {
+    currentAlisNo = '';
+    document.getElementById('alimDetailContent').innerHTML = `
+        <div class="text-center">
+            <div class="spinner-border text-primary" role="status">
+                <span class="visually-hidden">Yükleniyor...</span>
+            </div>
+            <p class="mt-2">Yükleniyor...</p>
+        </div>
+    `;
+});
 </script>
 
 </body>
